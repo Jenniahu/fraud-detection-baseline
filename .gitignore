@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# 数据文件（太大，不提交）
+data/creditcard.csv
+data/*.csv
+
+# 结果（可选提交）
+# results/
+# figures/
+
+# 环境
+.env
+venv/
+.venv/
