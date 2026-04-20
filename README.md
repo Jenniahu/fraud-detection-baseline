@@ -85,7 +85,7 @@ jupyter notebook notebooks/baseline_experiment.ipynb
 |--------|------|------|
 | `baseline` | 无重采样 | 原始不平衡数据，作为对照组 |
 | `oversample` | SMOTE | KNN 合成少数类样本 |
-| `undersample` | Tomek Links | 移除决策边界的多数类噪声样本 |
+| `undersample` | SMOTE-ENN | 先 SMOTE 平衡，再 ENN 清理边界噪声 |
 | `hybrid` | SMOTE-Tomek | 先 SMOTE 后 Tomek，**Proposal 核心研究对象** |
 
 ### 分类器

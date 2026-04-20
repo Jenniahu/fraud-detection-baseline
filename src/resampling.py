@@ -6,9 +6,9 @@ resampling.py
 支持的策略:
   - baseline      : 不做任何重采样（原始不平衡数据）
   - oversample    : SMOTE 过采样
-  - undersample   : Tomek Links 欠采样
+  - undersample   : SMOTE-ENN 混合采样（先 SMOTE 后 ENN 清理）
   - hybrid        : SMOTE-Tomek 混合采样（先 SMOTE 后 Tomek）
-  - smoteenn      : SMOTE-ENN（额外对比基准，可选）
+  - smoteenn      : SMOTE-ENN（与 undersample 相同，保留别名）
 
 所有策略返回 (X_resampled, y_resampled) numpy 数组。
 """
@@ -72,18 +72,24 @@ def strategy_smote(X_train: np.ndarray,
 
 
 @register("undersample")
-def strategy_tomek(X_train: np.ndarray,
-                   y_train: np.ndarray,
-                   random_state: int = 42,
-                   **kwargs):
+def strategy_smoteenn(X_train: np.ndarray,
+                      y_train: np.ndarray,
+                      random_state: int = 42,
+                      k_neighbors: int = 5,
+                      **kwargs):
     """
-    Tomek Links 欠采样
-    - 移除多数类中与少数类最近邻的样本，清晰化决策边界
-    - 不会大幅减少样本量，仅做边界清理
+    SMOTE-ENN 混合采样（替代原 Tomek Links）
+    - Step 1: SMOTE 生成合成少数类样本，平衡类别分布
+    - Step 2: ENN 清理被邻居误分类的样本（包括合成噪声）
+    - ENN 清理力度比 Tomek Links 更强，适合极度不平衡数据
     """
-    tomek = TomekLinks(n_jobs=-1)
-    X_res, y_res = tomek.fit_resample(X_train, y_train)
-    _print_distribution("Tomek Links (Undersample)", y_res)
+    smote_enn = SMOTEENN(
+        smote=SMOTE(k_neighbors=k_neighbors, random_state=random_state),
+        random_state=random_state,
+        n_jobs=-1,
+    )
+    X_res, y_res = smote_enn.fit_resample(X_train, y_train)
+    _print_distribution("SMOTE-ENN (Undersample)", y_res)
     return X_res, y_res
 
 
@@ -110,24 +116,15 @@ def strategy_smotetomek(X_train: np.ndarray,
 
 
 @register("smoteenn")
-def strategy_smoteenn(X_train: np.ndarray,
-                       y_train: np.ndarray,
-                       random_state: int = 42,
-                       k_neighbors: int = 5,
-                       **kwargs):
+def strategy_smoteenn_alias(X_train: np.ndarray,
+                            y_train: np.ndarray,
+                            random_state: int = 42,
+                            k_neighbors: int = 5,
+                            **kwargs):
     """
-    SMOTE-ENN（额外对比基准，可选）
-    - 用 Edited Nearest Neighbours 替代 Tomek Links 做边界清理
-    - ENN 清理力度更强，移除误分类样本
+    SMOTE-ENN（undersample 的别名，用于兼容）
     """
-    smote_enn = SMOTEENN(
-        smote=SMOTE(k_neighbors=k_neighbors, random_state=random_state),
-        random_state=random_state,
-        n_jobs=-1,
-    )
-    X_res, y_res = smote_enn.fit_resample(X_train, y_train)
-    _print_distribution("SMOTE-ENN (Extra Baseline)", y_res)
-    return X_res, y_res
+    return strategy_smoteenn(X_train, y_train, random_state, k_neighbors, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────

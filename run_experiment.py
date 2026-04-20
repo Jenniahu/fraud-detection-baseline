@@ -54,6 +54,11 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(FIGURES_DIR, exist_ok=True)
 
 DEFAULT_STRATEGIES = ["baseline", "oversample", "undersample", "hybrid"]
+# 策略说明:
+#   baseline    : 原始不平衡数据
+#   oversample  : SMOTE 过采样
+#   undersample : SMOTE-ENN（先 SMOTE 平衡，再 ENN 清理）
+#   hybrid      : SMOTE-Tomek（Proposal 核心研究对象）
 DEFAULT_MODELS     = ["logistic_regression", "random_forest", "xgboost"]
 RANDOM_SEED        = 42
 
