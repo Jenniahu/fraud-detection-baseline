@@ -190,7 +190,14 @@ def run_single_experiment(strategy_name: str,
         X_val, y_val = None, None
 
     # 3. 构建 & 训练模型
-    model = build_model(model_name)
+    # XGBoost: baseline 使用原始数据计算 scale_pos_weight，重采样后禁用权重
+    if model_name == "xgboost":
+        if strategy_name == "baseline":
+            model = build_model(model_name, y_train=y_tr)  # 使用原始比例
+        else:
+            model = build_model(model_name, scale_pos_weight=1)  # 重采样后禁用权重
+    else:
+        model = build_model(model_name)
     t1 = time.time()
     model.fit(X_tr, y_tr)
     train_time = time.time() - t1

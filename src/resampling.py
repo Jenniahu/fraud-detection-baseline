@@ -55,41 +55,58 @@ def strategy_smote(X_train: np.ndarray,
                    y_train: np.ndarray,
                    random_state: int = 42,
                    k_neighbors: int = 5,
+                   sampling_strategy: float = 0.05,  # 更轻度：5% 而非 10%
                    **kwargs):
     """
-    SMOTE 过采样（Synthetic Minority Over-sampling Technique）
-    - 对少数类生成合成样本，使正负类比例达到 1:1
-    - k_neighbors: KNN 邻居数，默认 5
+    Borderline-SMOTE 轻度过采样（优化版）
+    - 仅对边界样本生成合成数据，避免噪声扩散
+    - sampling_strategy=0.05，更保守的采样比例
+    - k_neighbors=3，减少近邻数量避免引入噪声
     """
-    smote = SMOTE(
-        k_neighbors=k_neighbors,
+    from imblearn.over_sampling import BorderlineSMOTE
+
+    smote = BorderlineSMOTE(
+        sampling_strategy=sampling_strategy,
+        k_neighbors=3,  # 减少近邻数，更严格
         random_state=random_state,
-        n_jobs=-1,
+        kind='borderline-1',  # 只针对边界样本
     )
     X_res, y_res = smote.fit_resample(X_train, y_train)
-    _print_distribution("SMOTE (Oversample)", y_res)
+    _print_distribution(f"Borderline-SMOTE (strategy={sampling_strategy})", y_res)
     return X_res, y_res
 
 
 @register("undersample")
-def strategy_smoteenn(X_train: np.ndarray,
-                      y_train: np.ndarray,
-                      random_state: int = 42,
-                      k_neighbors: int = 5,
-                      **kwargs):
+def strategy_adasyn_clean(X_train: np.ndarray,
+                          y_train: np.ndarray,
+                          random_state: int = 42,
+                          k_neighbors: int = 5,
+                          **kwargs):
     """
-    SMOTE-ENN 混合采样（替代原 Tomek Links）
-    - Step 1: SMOTE 生成合成少数类样本，平衡类别分布
-    - Step 2: ENN 清理被邻居误分类的样本（包括合成噪声）
-    - ENN 清理力度比 Tomek Links 更强，适合极度不平衡数据
+    ADASYN + ENN 混合采样（优化版）
+    - Step 1: ADASYN 自适应生成，对难分类样本生成更多合成数据
+    - Step 2: ENN 清理噪声，保留干净样本
+    - 比 SMOTE-ENN 更智能，避免均匀生成导致的噪声
     """
-    smote_enn = SMOTEENN(
-        smote=SMOTE(k_neighbors=k_neighbors, random_state=random_state),
+    from imblearn.over_sampling import ADASYN
+
+    # 第一步：ADASYN 自适应过采样
+    adasyn = ADASYN(
+        sampling_strategy=0.05,  # 轻度采样
+        n_neighbors=3,
         random_state=random_state,
-        n_jobs=-1,
     )
-    X_res, y_res = smote_enn.fit_resample(X_train, y_train)
-    _print_distribution("SMOTE-ENN (Undersample)", y_res)
+    X_temp, y_temp = adasyn.fit_resample(X_train, y_train)
+
+    # 第二步：ENN 清理
+    from imblearn.under_sampling import EditedNearestNeighbours
+    enn = EditedNearestNeighbours(
+        n_neighbors=3,
+        kind_sel='mode',
+    )
+    X_res, y_res = enn.fit_resample(X_temp, y_temp)
+
+    _print_distribution("ADASYN+ENN (Undersample)", y_res)
     return X_res, y_res
 
 
@@ -100,31 +117,36 @@ def strategy_smotetomek(X_train: np.ndarray,
                          k_neighbors: int = 5,
                          **kwargs):
     """
-    SMOTE-Tomek 混合策略（Proposal 核心研究对象）
-    - Step 1: SMOTE 生成合成少数类样本
-    - Step 2: Tomek Links 清理合成样本附近的噪声/边界模糊样本
-    - 兼顾过采样和欠采样优势，旨在得到更清晰的决策边界
+    SMOTE-Tomek 混合策略（保守参数优化版）
+    - Step 1: 轻度 SMOTE (sampling_strategy=0.05)
+    - Step 2: Tomek Links 清理边界噪声
+    - 更保守的采样比例，避免过度合成
     """
+    from imblearn.over_sampling import SMOTE
+
     smote_tomek = SMOTETomek(
-        smote=SMOTE(k_neighbors=k_neighbors, random_state=random_state),
+        smote=SMOTE(
+            sampling_strategy=0.05,  # 更保守
+            k_neighbors=3,
+            random_state=random_state
+        ),
         random_state=random_state,
-        n_jobs=-1,
     )
     X_res, y_res = smote_tomek.fit_resample(X_train, y_train)
-    _print_distribution("SMOTE-Tomek (Hybrid)", y_res)
+    _print_distribution("SMOTE-Tomek Conservative (Hybrid)", y_res)
     return X_res, y_res
 
 
 @register("smoteenn")
-def strategy_smoteenn_alias(X_train: np.ndarray,
-                            y_train: np.ndarray,
-                            random_state: int = 42,
-                            k_neighbors: int = 5,
-                            **kwargs):
+def strategy_adasyn_alias(X_train: np.ndarray,
+                          y_train: np.ndarray,
+                          random_state: int = 42,
+                          k_neighbors: int = 5,
+                          **kwargs):
     """
-    SMOTE-ENN（undersample 的别名，用于兼容）
+    ADASYN+ENN（undersample 的别名，用于兼容）
     """
-    return strategy_smoteenn(X_train, y_train, random_state, k_neighbors, **kwargs)
+    return strategy_adasyn_clean(X_train, y_train, random_state, k_neighbors, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────

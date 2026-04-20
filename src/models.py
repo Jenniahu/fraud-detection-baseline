@@ -45,6 +45,7 @@ DEFAULT_PARAMS: dict = {
         "learning_rate"    : 0.1,
         "subsample"        : 0.8,
         "colsample_bytree" : 0.8,
+        "scale_pos_weight" : 577,   # 处理不平衡: 多数类/少数类 ≈ 284315/492
         "use_label_encoder": False,
         "eval_metric"      : "logloss",
         "random_state"     : 42,
@@ -75,6 +76,8 @@ def build_model(model_name: str, **override_params):
         'logistic_regression' | 'random_forest' | 'xgboost'
     **override_params :
         覆盖默认超参数（例如 n_estimators=200）
+        特殊参数:
+        - y_train: 传入训练集标签，自动计算 xgboost 的 scale_pos_weight
 
     Returns
     -------
@@ -88,6 +91,15 @@ def build_model(model_name: str, **override_params):
 
     cls    = MODEL_REGISTRY[model_name]
     params = {**DEFAULT_PARAMS[model_name], **override_params}
+
+    # 如果传入 y_train，自动计算 scale_pos_weight
+    if model_name == "xgboost" and "y_train" in params:
+        y_train = params.pop("y_train")
+        n_neg = (y_train == 0).sum()
+        n_pos = (y_train == 1).sum()
+        params["scale_pos_weight"] = n_neg / n_pos
+        print(f"[XGBoost] 自动计算 scale_pos_weight: {n_neg}/{n_pos} = {n_neg/n_pos:.2f}")
+
     return cls(**params)
 
 

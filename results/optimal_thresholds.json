@@ -1,0 +1,14 @@
+{
+  "baseline|logistic_regression|f1": 0.07,
+  "baseline|random_forest|f1": 0.38,
+  "baseline|xgboost|f1": 0.74,
+  "oversample|logistic_regression|f1": 0.74,
+  "oversample|random_forest|f1": 0.3,
+  "oversample|xgboost|f1": 0.79,
+  "undersample|logistic_regression|f1": 0.41,
+  "undersample|random_forest|f1": 0.64,
+  "undersample|xgboost|f1": 0.78,
+  "hybrid|logistic_regression|f1": 0.39,
+  "hybrid|random_forest|f1": 0.6,
+  "hybrid|xgboost|f1": 0.81
+}
