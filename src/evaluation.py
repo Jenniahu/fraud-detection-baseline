@@ -113,6 +113,85 @@ def compute_gmean(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.sqrt(tpr * tnr))
 
 
+def find_optimal_threshold(y_true: np.ndarray,
+                           y_proba: np.ndarray,
+                           metric: str = "f1",
+                           thresholds: np.ndarray = None) -> tuple:
+    """
+    在验证集上搜索最优分类阈值。
+
+    Parameters
+    ----------
+    y_true : np.ndarray
+        真实标签
+    y_proba : np.ndarray
+        预测概率（正类概率）
+    metric : str
+        优化目标指标: "f1" | "g_mean" | "precision" | "recall"
+    thresholds : np.ndarray, optional
+        待搜索的阈值列表，默认从 0.01 到 0.99 步进 0.01
+
+    Returns
+    -------
+    tuple: (best_threshold, best_score, all_scores)
+        best_threshold: 最优阈值
+        best_score: 最优指标值
+        all_scores: 所有阈值对应的指标值字典
+    """
+    if thresholds is None:
+        thresholds = np.arange(0.01, 1.0, 0.01)
+
+    best_threshold = 0.5
+    best_score = -1.0
+    all_scores = []
+
+    for thresh in thresholds:
+        y_pred = (y_proba >= thresh).astype(int)
+
+        if metric == "f1":
+            score = f1_score(y_true, y_pred, zero_division=0)
+        elif metric == "g_mean":
+            score = compute_gmean(y_true, y_pred)
+        elif metric == "precision":
+            score = precision_score(y_true, y_pred, zero_division=0)
+        elif metric == "recall":
+            score = recall_score(y_true, y_pred, zero_division=0)
+        else:
+            raise ValueError(f"未知指标: {metric}，可选: f1, g_mean, precision, recall")
+
+        all_scores.append({"threshold": round(thresh, 3), "score": round(score, 6)})
+
+        if score > best_score:
+            best_score = score
+            best_threshold = thresh
+
+    return best_threshold, best_score, all_scores
+
+
+def get_model_proba(model, X: np.ndarray) -> np.ndarray:
+    """
+    统一获取模型预测概率。
+
+    Parameters
+    ----------
+    model : sklearn-compatible classifier
+    X : np.ndarray
+        特征数据
+
+    Returns
+    -------
+    np.ndarray
+        正类预测概率
+    """
+    if hasattr(model, "predict_proba"):
+        return model.predict_proba(X)[:, 1]
+    elif hasattr(model, "decision_function"):
+        df = model.decision_function(X)
+        return (df - df.min()) / (df.max() - df.min() + 1e-9)
+    else:
+        raise AttributeError("模型需要支持 predict_proba 或 decision_function")
+
+
 # ─────────────────────────────────────────────────────────────────
 # 打印格式化报告
 # ─────────────────────────────────────────────────────────────────

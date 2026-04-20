@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.data_loader  import load_data, preprocess
 from src.resampling   import get_resampled, list_strategies
 from src.models       import build_model, list_models
-from src.evaluation   import evaluate_model
+from src.evaluation   import evaluate_model, find_optimal_threshold, get_model_proba
 from src.visualization import (
     plot_pr_curves,
     plot_roc_curves,
@@ -57,6 +57,11 @@ DEFAULT_STRATEGIES = ["baseline", "oversample", "undersample", "hybrid"]
 DEFAULT_MODELS     = ["logistic_regression", "random_forest", "xgboost"]
 RANDOM_SEED        = 42
 
+# 阈值优化配置
+OPTIMIZE_THRESHOLD = True          # 是否启用阈值优化
+THRESHOLD_METRIC   = "f1"          # 优化目标: f1 | g_mean | precision | recall
+VAL_SPLIT_RATIO    = 0.2           # 从训练集划分验证集的比例
+
 # ─────────────────────────────────────────────────────────────────
 # 核心实验流程
 # ─────────────────────────────────────────────────────────────────
@@ -66,14 +71,25 @@ def run_single_experiment(strategy_name: str,
                            y_train: np.ndarray,
                            X_test: np.ndarray,
                            y_test: np.ndarray,
-                           verbose: bool = True) -> dict:
+                           verbose: bool = True,
+                           optimize_threshold: bool = OPTIMIZE_THRESHOLD,
+                           threshold_metric: str = THRESHOLD_METRIC) -> dict:
     """
     运行单组实验: 一种重采样策略 + 一种分类器
+
+    Parameters
+    ----------
+    optimize_threshold : bool
+        是否启用阈值优化（从训练集划分验证集搜索最优阈值）
+    threshold_metric : str
+        阈值优化目标指标: f1 | g_mean | precision | recall
 
     Returns
     -------
     dict 包含 strategy, model, 各项指标, 训练时间, y_proba
     """
+    from sklearn.model_selection import train_test_split
+
     label = f"[{strategy_name.upper()} × {model_name}]"
     if verbose:
         print(f"\n{'─'*55}")
@@ -88,34 +104,57 @@ def run_single_experiment(strategy_name: str,
     )
     resample_time = time.time() - t0
 
-    # 2. 构建 & 训练模型
+    # 2. 划分训练/验证集（用于阈值优化）
+    if optimize_threshold:
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_res, y_res,
+            test_size=VAL_SPLIT_RATIO,
+            stratify=y_res,
+            random_state=RANDOM_SEED,
+        )
+    else:
+        X_tr, y_tr = X_res, y_res
+        X_val, y_val = None, None
+
+    # 3. 构建 & 训练模型
     model = build_model(model_name)
-    t1    = time.time()
-    model.fit(X_res, y_res)
+    t1 = time.time()
+    model.fit(X_tr, y_tr)
     train_time = time.time() - t1
 
-    # 3. 评估
-    metrics = evaluate_model(model, X_test, y_test, verbose=verbose)
+    # 4. 阈值优化（在验证集上搜索）
+    best_threshold = 0.5
+    if optimize_threshold and X_val is not None:
+        y_val_proba = get_model_proba(model, X_val)
+        best_threshold, best_val_score, _ = find_optimal_threshold(
+            y_val, y_val_proba, metric=threshold_metric
+        )
+        if verbose:
+            print(f"  🔧 阈值优化: 最优阈值={best_threshold:.3f} "
+                  f"(验证集 {threshold_metric.upper()}={best_val_score:.4f})")
 
-    # 4. 保存预测概率（用于后续绘图）
-    if hasattr(model, "predict_proba"):
-        y_proba = model.predict_proba(X_test)[:, 1]
-    else:
-        df = model.decision_function(X_test)
-        y_proba = (df - df.min()) / (df.max() - df.min() + 1e-9)
+    # 5. 在测试集上评估（使用最优阈值）
+    metrics = evaluate_model(model, X_test, y_test,
+                             threshold=best_threshold, verbose=verbose)
+
+    # 6. 保存预测概率（用于后续绘图）
+    y_proba = get_model_proba(model, X_test)
 
     result = {
-        "strategy"     : strategy_name,
-        "model"        : model_name,
-        "resample_time": round(resample_time, 3),
-        "train_time"   : round(train_time,    3),
+        "strategy"       : strategy_name,
+        "model"          : model_name,
+        "resample_time"  : round(resample_time, 3),
+        "train_time"     : round(train_time,    3),
+        "threshold"      : round(best_threshold, 3),
         **{k: v for k, v in metrics.items() if k != "confusion_matrix"},
-        "_y_proba"     : y_proba,           # 不保存到 CSV
-        "_cm"          : metrics["confusion_matrix"],
+        "_y_proba"       : y_proba,
+        "_cm"            : metrics["confusion_matrix"],
     }
 
     if verbose:
-        print(f"\n  ⏱  重采样: {resample_time:.2f}s | 训练: {train_time:.2f}s")
+        opt_info = "(优化后)" if optimize_threshold else "(固定 0.5)"
+        print(f"\n  ⏱  重采样: {resample_time:.2f}s | 训练: {train_time:.2f}s "
+              f"| 阈值{opt_info}: {best_threshold:.3f}")
 
     return result
 
@@ -244,20 +283,28 @@ def _save_results(df: pd.DataFrame):
 
 def _print_summary(df: pd.DataFrame):
     """打印实验汇总表"""
-    print("\n" + "═" * 75)
+    print("\n" + "═" * 85)
     print("  实验汇总（按 AUPRC 降序排列）")
-    print("═" * 75)
-    display_cols = ["strategy", "model", "recall", "precision",
+    print("═" * 85)
+    display_cols = ["strategy", "model", "threshold", "recall", "precision",
                     "f1", "g_mean", "auprc", "auroc"]
     summary = df[display_cols].sort_values("auprc", ascending=False)
     print(summary.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-    print("═" * 75)
+    print("═" * 85)
 
     # 最优组合
     best = summary.iloc[0]
     print(f"\n  🏆 最优组合 (AUPRC): "
           f"{best['strategy']} × {best['model']}  "
+          f"阈值={best['threshold']:.3f}  "
           f"AUPRC={best['auprc']:.4f}  Recall={best['recall']:.4f}")
+
+    # 阈值优化效果对比（如果有对比数据）
+    if OPTIMIZE_THRESHOLD:
+        print(f"\n  📊 阈值优化说明:")
+        print(f"     每个 (策略, 模型) 组合在验证集上独立搜索最优阈值")
+        print(f"     优化目标: {THRESHOLD_METRIC.upper()}")
+        print(f"     确保各策略都处于最优决策点后再进行公平比较")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -287,11 +334,30 @@ def parse_args():
         "--quiet", action="store_true",
         help="静默模式，减少输出",
     )
+    parser.add_argument(
+        "--no_threshold_opt", action="store_true",
+        help="禁用阈值优化，使用固定阈值 0.5（用于对比实验）",
+    )
+    parser.add_argument(
+        "--threshold_metric", type=str, default="f1",
+        choices=["f1", "g_mean", "precision", "recall"],
+        help="阈值优化目标指标（默认 f1）",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # 根据命令行参数更新阈值优化配置
+    optimize_threshold = not args.no_threshold_opt
+    threshold_metric = args.threshold_metric
+
+    # 临时修改全局配置（用于传递给 run_all_experiments）
+    import run_experiment as re_module
+    re_module.OPTIMIZE_THRESHOLD = optimize_threshold
+    re_module.THRESHOLD_METRIC = threshold_metric
+
     results = run_all_experiments(
         strategies=args.strategies,
         models=args.models,
