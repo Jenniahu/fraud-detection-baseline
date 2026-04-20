@@ -67,6 +67,74 @@ OPTIMIZE_THRESHOLD = True          # 是否启用阈值优化
 THRESHOLD_METRIC   = "f1"          # 优化目标: f1 | g_mean | precision | recall
 VAL_SPLIT_RATIO    = 0.2           # 从训练集划分验证集的比例
 
+# 阈值缓存配置
+THRESHOLD_CACHE_FILE = os.path.join(RESULTS_DIR, "optimal_thresholds.json")
+RECALCULATE_THRESHOLD = False      # 是否强制重新计算阈值（忽略缓存）
+
+# ─────────────────────────────────────────────────────────────────
+# 阈值缓存管理
+# ─────────────────────────────────────────────────────────────────
+def _load_threshold_cache(cache_file: str = THRESHOLD_CACHE_FILE) -> dict:
+    """
+    加载阈值缓存文件
+
+    Returns
+    -------
+    dict: { (strategy, model, metric): threshold, ... }
+    """
+    if not os.path.exists(cache_file):
+        return {}
+    try:
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            cache = json.load(f)
+        # 转换 key 从字符串元组格式
+        return {tuple(k.split('|')): v for k, v in cache.items()}
+    except Exception:
+        return {}
+
+
+def _save_threshold_cache(cache: dict, cache_file: str = THRESHOLD_CACHE_FILE):
+    """
+    保存阈值缓存到文件
+
+    Parameters
+    ----------
+    cache : dict
+        { (strategy, model, metric): threshold, ... }
+    """
+    # 转换 key 为可序列化的字符串格式
+    serializable_cache = {'|'.join(k): v for k, v in cache.items()}
+    with open(cache_file, 'w', encoding='utf-8') as f:
+        json.dump(serializable_cache, f, indent=2, ensure_ascii=False)
+
+
+def _get_cached_threshold(strategy: str, model: str, metric: str,
+                          cache: dict = None) -> float:
+    """
+    从缓存中获取阈值
+
+    Returns
+    -------
+    float or None: 如果缓存存在返回阈值，否则返回 None
+    """
+    if cache is None:
+        cache = _load_threshold_cache()
+    key = (strategy, model, metric)
+    return cache.get(key)
+
+
+def _cache_threshold(strategy: str, model: str, metric: str,
+                     threshold: float, cache: dict = None):
+    """
+    将阈值存入缓存并保存到文件
+    """
+    if cache is None:
+        cache = _load_threshold_cache()
+    key = (strategy, model, metric)
+    cache[key] = round(threshold, 6)
+    _save_threshold_cache(cache)
+
+
 # ─────────────────────────────────────────────────────────────────
 # 核心实验流程
 # ─────────────────────────────────────────────────────────────────
@@ -127,16 +195,32 @@ def run_single_experiment(strategy_name: str,
     model.fit(X_tr, y_tr)
     train_time = time.time() - t1
 
-    # 4. 阈值优化（在验证集上搜索）
+    # 4. 阈值优化（使用缓存或搜索）
     best_threshold = 0.5
+    cache = _load_threshold_cache()
+    cached_thresh = _get_cached_threshold(strategy_name, model_name,
+                                          threshold_metric, cache)
+
     if optimize_threshold and X_val is not None:
-        y_val_proba = get_model_proba(model, X_val)
-        best_threshold, best_val_score, _ = find_optimal_threshold(
-            y_val, y_val_proba, metric=threshold_metric
-        )
-        if verbose:
-            print(f"  🔧 阈值优化: 最优阈值={best_threshold:.3f} "
-                  f"(验证集 {threshold_metric.upper()}={best_val_score:.4f})")
+        if cached_thresh is not None and not RECALCULATE_THRESHOLD:
+            # 使用缓存的阈值
+            best_threshold = cached_thresh
+            if verbose:
+                print(f"  💾 阈值缓存: 使用已保存的阈值={best_threshold:.3f} "
+                      f"({strategy_name}|{model_name}|{threshold_metric})")
+        else:
+            # 搜索最优阈值
+            y_val_proba = get_model_proba(model, X_val)
+            best_threshold, best_val_score, _ = find_optimal_threshold(
+                y_val, y_val_proba, metric=threshold_metric
+            )
+            # 保存到缓存
+            _cache_threshold(strategy_name, model_name, threshold_metric,
+                            best_threshold, cache)
+            if verbose:
+                source = "重新计算" if RECALCULATE_THRESHOLD else "首次计算"
+                print(f"  🔧 阈值优化: 最优阈值={best_threshold:.3f} "
+                      f"(验证集 {threshold_metric.upper()}={best_val_score:.4f}) [{source}]")
 
     # 5. 在测试集上评估（使用最优阈值）
     metrics = evaluate_model(model, X_test, y_test,
@@ -348,20 +432,38 @@ def parse_args():
         choices=["f1", "g_mean", "precision", "recall"],
         help="阈值优化目标指标（默认 f1）",
     )
+    parser.add_argument(
+        "--recalculate_threshold", action="store_true",
+        help="强制重新计算阈值（忽略缓存，用于更新阈值）",
+    )
+    parser.add_argument(
+        "--clear_threshold_cache", action="store_true",
+        help="清空阈值缓存文件",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
 
+    # 处理清空缓存请求
+    if args.clear_threshold_cache:
+        if os.path.exists(THRESHOLD_CACHE_FILE):
+            os.remove(THRESHOLD_CACHE_FILE)
+            print(f"[INFO] 已清空阈值缓存: {THRESHOLD_CACHE_FILE}")
+        else:
+            print(f"[INFO] 阈值缓存文件不存在: {THRESHOLD_CACHE_FILE}")
+
     # 根据命令行参数更新阈值优化配置
     optimize_threshold = not args.no_threshold_opt
     threshold_metric = args.threshold_metric
+    recalculate = args.recalculate_threshold
 
     # 临时修改全局配置（用于传递给 run_all_experiments）
     import run_experiment as re_module
     re_module.OPTIMIZE_THRESHOLD = optimize_threshold
     re_module.THRESHOLD_METRIC = threshold_metric
+    re_module.RECALCULATE_THRESHOLD = recalculate
 
     results = run_all_experiments(
         strategies=args.strategies,
