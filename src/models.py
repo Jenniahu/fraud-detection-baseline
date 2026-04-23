@@ -14,6 +14,7 @@ models.py
 from sklearn.linear_model    import LogisticRegression
 from sklearn.ensemble        import RandomForestClassifier
 from xgboost                 import XGBClassifier
+from src.ensemble_sampler    import ResampleBoostClassifier
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -52,6 +53,16 @@ DEFAULT_PARAMS: dict = {
         "n_jobs"           : -1,
         "verbosity"        : 0,
     },
+
+    "resample_boost": {
+        # ResampleBoost: 每轮AdaBoost迭代前调用resampling.py策略重采样
+        # 原理: 每轮根据样本权重采样→重采样→训练决策树→更新权重
+        "strategy"      : "oversample",  # 使用resampling.py中的策略
+        "n_estimators"  : 50,            # Boosting迭代轮数
+        "learning_rate" : 0.1,
+        "max_depth"     : 3,             # 弱学习器深度（防止过拟合）
+        "random_state"  : 42,
+    },
 }
 
 # 模型名 -> sklearn 类 的映射
@@ -59,6 +70,7 @@ MODEL_REGISTRY: dict = {
     "logistic_regression": LogisticRegression,
     "random_forest"      : RandomForestClassifier,
     "xgboost"            : XGBClassifier,
+    "resample_boost"     : ResampleBoostClassifier,  # 每轮迭代调用resampling.py重采样
 }
 
 

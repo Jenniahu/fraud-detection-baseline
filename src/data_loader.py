@@ -62,14 +62,54 @@ def load_data(csv_path: str = CSV_PATH, verbose: bool = True) -> pd.DataFrame:
     return df
 
 
+def compute_amount_weight(amounts: np.ndarray, method: str = "log1p") -> np.ndarray:
+    """
+    基于原始交易金额计算样本权重。
+
+    核心思想：漏报大额欺诈交易的惩罚应高于小额交易，
+    使模型训练更符合金融业务的经济逻辑。
+
+    Parameters
+    ----------
+    amounts : np.ndarray
+        原始交易金额（未做任何变换）
+    method : str
+        权重计算方式:
+        - "log1p" : log1p(amount) / mean，温和压缩（推荐，默认）
+        - "sqrt"  : sqrt(amount) / mean，中等压缩
+        - "linear": amount / mean，线性权重（不推荐，易梯度爆炸）
+        - "none"  : 全 1，等权重
+
+    Returns
+    -------
+    np.ndarray  归一化后的样本权重（均值为 1）
+    """
+    amounts = np.asarray(amounts, dtype=float)
+    if method == "log1p":
+        weights = np.log1p(amounts)
+    elif method == "sqrt":
+        weights = np.sqrt(amounts)
+    elif method == "linear":
+        weights = amounts
+    else:
+        weights = np.ones_like(amounts, dtype=float)
+
+    # 归一化到均值=1，避免梯度爆炸
+    weights = weights / weights.mean()
+    return weights
+
+
 def preprocess(df: pd.DataFrame,
                test_size: float = 0.2,
                random_state: int = RANDOM_SEED,
-               verbose: bool = True):
+               verbose: bool = True,
+               amount_transform: str = "robust",
+               return_amount: bool = False):
     """
     完整预处理流程:
-      1. 用 RobustScaler 标准化 Time / Amount
-      2. 分层 80/20 训练测试分割
+      1. Amount 可选 log1p 变换处理偏态分布
+      2. 用 RobustScaler 标准化 Time / Amount
+      3. 分层 80/20 训练测试分割
 
     Parameters
     ----------
@@ -81,32 +121,55 @@ def preprocess(df: pd.DataFrame,
         随机种子
     verbose : bool
         是否打印分割结果信息
+    amount_transform : str
+        Amount 字段预处理方式:
+        - "robust" : 直接 RobustScaler（默认，基线）
+        - "log1p"  : 先 log1p 变换，再 RobustScaler
+    return_amount : bool
+        是否同时返回原始 Amount 数组（用于计算金额加权损失）
 
     Returns
     -------
-    X_train, X_test, y_train, y_test : np.ndarray
+    X_train, X_test, y_train, y_test [, amount_train, amount_test] : np.ndarray
     """
     df = df.copy()
 
-    # 1. RobustScaler 标准化（对异常值鲁棒）
+    # 保存原始 Amount（用于金额加权，在变换前提取）
+    amounts = df["Amount"].values.copy() if return_amount else None
+
+    # 1. Amount 可选对数变换
+    if amount_transform == "log1p":
+        df["Amount"] = np.log1p(df["Amount"])
+
+    # 2. RobustScaler 标准化（对异常值鲁棒）
     scaler = RobustScaler()
     df[SCALE_COLS] = scaler.fit_transform(df[SCALE_COLS])
 
-    # 2. 特征 / 标签分离
+    # 3. 特征 / 标签分离
     X = df.drop(columns=[TARGET_COL]).values
     y = df[TARGET_COL].values
 
-    # 3. 分层分割（保持正负样本比例一致）
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=test_size,
-        stratify=y,
-        random_state=random_state,
-    )
+    # 4. 分层分割（保持正负样本比例一致）
+    if return_amount:
+        X_train, X_test, y_train, y_test, amount_train, amount_test = train_test_split(
+            X, y, amounts,
+            test_size=test_size,
+            stratify=y,
+            random_state=random_state,
+        )
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=test_size,
+            stratify=y,
+            random_state=random_state,
+        )
 
     if verbose:
         _print_split_stats(y_train, y_test)
 
+    if return_amount:
+        return X_train, X_test, y_train, y_test, amount_train, amount_test
     return X_train, X_test, y_train, y_test
 
 

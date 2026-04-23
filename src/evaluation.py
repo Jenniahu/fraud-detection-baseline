@@ -9,6 +9,11 @@ evaluation.py
   - AUPRC   (Area Under Precision-Recall Curve) —— 主要评估指标
   - AUROC   (Area Under ROC Curve)              —— 辅助参考
   - Confusion Matrix
+  - 金额敏感指标（金额加权场景下使用）:
+      - FN_Amount    : 漏报欺诈交易的总金额（越低越好）
+      - FP_Amount    : 误报正常交易的总金额（越低越好）
+      - Amount_Recall: 拦截欺诈金额占全部欺诈金额的比例（越高越好）
+      - Amount_Precision: 报警交易中欺诈金额占比（越高越好）
 
 提供 evaluate_model() 统一接口，返回指标字典。
 """
@@ -32,7 +37,8 @@ def evaluate_model(model,
                    X_test: np.ndarray,
                    y_test: np.ndarray,
                    threshold: float = 0.5,
-                   verbose: bool = True) -> dict:
+                   verbose: bool = True,
+                   amount_test: np.ndarray = None) -> dict:
     """
     在测试集上评估模型，返回全套指标字典。
 
@@ -46,12 +52,16 @@ def evaluate_model(model,
         分类阈值（默认 0.5，可调以优化 Recall/Precision 平衡）
     verbose : bool
         是否打印详细报告
+    amount_test : np.ndarray, optional
+        测试集每笔交易的原始金额（用于计算金额敏感指标）
 
     Returns
     -------
     dict 包含以下 key:
         precision, recall, f1, g_mean, auprc, auroc,
         confusion_matrix, threshold
+        + 金额敏感指标（当 amount_test 不为 None 时）:
+          fn_amount, fp_amount, amount_recall, amount_precision
     """
     # ── 获取预测概率 ──────────────────────────────────────────────
     if hasattr(model, "predict_proba"):
@@ -97,6 +107,40 @@ def evaluate_model(model,
         "confusion_matrix": cm,
         "threshold"       : threshold,
     }
+
+    # ── 金额敏感指标 ─────────────────────────────────────────────
+    if amount_test is not None:
+        amount_test = np.asarray(amount_test, dtype=float)
+
+        # 漏报金额：实际为欺诈但预测为正常的交易金额之和
+        fn_mask = (y_test == 1) & (y_pred == 0)
+        fn_amount = float(amount_test[fn_mask].sum())
+
+        # 误报金额：实际为正常但预测为欺诈的交易金额之和
+        fp_mask = (y_test == 0) & (y_pred == 1)
+        fp_amount = float(amount_test[fp_mask].sum())
+
+        # 全部欺诈交易金额
+        total_fraud_amount = float(amount_test[y_test == 1].sum())
+
+        # 全部报警交易金额
+        flagged_mask = (y_pred == 1)
+        total_flagged_amount = float(amount_test[flagged_mask].sum())
+
+        # 拦截的欺诈金额
+        caught_mask = (y_test == 1) & (y_pred == 1)
+        caught_fraud_amount = float(amount_test[caught_mask].sum())
+
+        # 金额召回率：拦截的欺诈金额 / 全部欺诈金额
+        amount_recall = caught_fraud_amount / (total_fraud_amount + 1e-9)
+
+        # 金额精确率：拦截的欺诈金额 / 全部报警金额
+        amount_precision = caught_fraud_amount / (total_flagged_amount + 1e-9)
+
+        results["fn_amount"]       = round(fn_amount, 2)
+        results["fp_amount"]       = round(fp_amount, 2)
+        results["amount_recall"]   = round(amount_recall, 6)
+        results["amount_precision"]= round(amount_precision, 6)
 
     if verbose:
         _print_results(results)
@@ -210,6 +254,15 @@ def _print_results(res: dict):
     cm = res['confusion_matrix']
     print(f"  混淆矩阵  :  TN={res['tn']:>5}  FP={res['fp']:>5}")
     print(f"              FN={res['fn']:>5}  TP={res['tp']:>5}")
+
+    # 金额敏感指标
+    if "fn_amount" in res:
+        print("─" * 45)
+        print(f"  漏报金额 (FN_Amount)    : €{res['fn_amount']:>12,.2f}  ← 越低越好")
+        print(f"  误报金额 (FP_Amount)    : €{res['fp_amount']:>12,.2f}  ← 越低越好")
+        print(f"  金额召回 (Amount_Recall): {res['amount_recall']:.4f}   ← 越高越好")
+        print(f"  金额精确 (Amount_Prec)  : {res['amount_precision']:.4f}   ← 越高越好")
+
     print("═" * 45)
 
 

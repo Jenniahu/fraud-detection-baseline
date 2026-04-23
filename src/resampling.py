@@ -149,6 +149,22 @@ def strategy_adasyn_alias(X_train: np.ndarray,
     return strategy_adasyn_clean(X_train, y_train, random_state, k_neighbors, **kwargs)
 
 
+@register("easy_ensemble")
+def strategy_easy_ensemble(X_train: np.ndarray,
+                           y_train: np.ndarray,
+                           random_state: int = 42,
+                           **kwargs):
+    """
+    EasyEnsemble 采样策略
+
+    注意：EasyEnsemble 的真正采样发生在模型训练阶段（EasyEnsembleWrapper
+    内部通过多次随机欠采样生成平衡子集），因此这里仅返回原始训练数据，
+    由模型层负责完成后续的多次采样与集成。
+    """
+    _print_distribution("EasyEnsemble (采样在模型内部完成)", y_train)
+    return X_train, y_train
+
+
 # ─────────────────────────────────────────────────────────────────
 # 公共接口
 # ─────────────────────────────────────────────────────────────────
