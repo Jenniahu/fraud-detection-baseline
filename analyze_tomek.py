@@ -15,9 +15,8 @@ import os
 import sys
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from src.data_loader import load_data, preprocess
+from src.data_loader import load_data
+from src.preprocessing import preprocess
 from src.visualization import plot_tomek_links
 
 

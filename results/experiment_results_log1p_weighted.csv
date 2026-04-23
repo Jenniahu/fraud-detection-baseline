@@ -1,0 +1,2 @@
+strategy,model,resample_time,train_time,threshold,precision,recall,f1,g_mean,auprc,auroc,tp,fp,tn,fn,fn_amount,fp_amount,amount_recall,amount_precision
+oversample,xgboost,5651.554000,1.132000,0.760000,0.877778,0.806122,0.840426,0.897756,0.853259,0.974162,79,11,56853,19,2385.630000,8.070000,0.775890,0.999024

@@ -225,7 +225,8 @@ def _print_distribution(name: str, y: np.ndarray):
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, "..")
-    from src.data_loader import load_data, preprocess
+    from src.data_loader import load_data
+    from src.preprocessing import preprocess
 
     df = load_data(verbose=False)
     X_train, X_test, y_train, y_test = preprocess(df, verbose=False)

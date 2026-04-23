@@ -1,0 +1,23 @@
+[
+  {
+    "strategy": "oversample",
+    "model": "xgboost",
+    "resample_time": 5651.554,
+    "train_time": 1.132,
+    "threshold": 0.76,
+    "precision": 0.877778,
+    "recall": 0.806122,
+    "f1": 0.840426,
+    "g_mean": 0.897756,
+    "auprc": 0.853259,
+    "auroc": 0.974162,
+    "tp": 79,
+    "fp": 11,
+    "tn": 56853,
+    "fn": 19,
+    "fn_amount": 2385.63,
+    "fp_amount": 8.07,
+    "amount_recall": 0.77589,
+    "amount_precision": 0.999024
+  }
+]
